@@ -4,8 +4,18 @@ import { supabase } from '../lib/supabase'
 import { format } from 'date-fns'
 
 type Order = {
-  id: string; order_number: string; total: number; status: string; created_at: string;
-  customers: { name: string } | null
+  id: string
+  order_number: string
+  total: number
+  status: string
+  created_at: string
+  customers: { name: string } | { name: string }[] | null
+}
+
+function getCustomerName(customers: Order['customers']): string {
+  if (!customers) return '—'
+  if (Array.isArray(customers)) return customers[0]?.name || '—'
+  return customers.name || '—'
 }
 
 export default function Dashboard() {
@@ -25,14 +35,14 @@ export default function Dashboard() {
         supabase.from('orders').select('id,order_number,total,status,created_at,customers(name)').order('created_at', { ascending: false }).limit(10),
       ])
 
-      const revenue = (revRes.data || []).reduce((s: number, o: { total: number }) => s + o.total, 0)
+      const revenue = (revRes.data || []).reduce((s: number, o: { total: number }) => s + (o.total || 0), 0)
       setStats({
         messages: msgRes.count || 0,
         orders: orderRes.count || 0,
         revenue,
         customers: custRes.count || 0,
       })
-      setOrders((recentRes.data as Order[]) || [])
+      setOrders((recentRes.data as unknown as Order[]) || [])
       setLoading(false)
     }
     load()
@@ -80,8 +90,8 @@ export default function Dashboard() {
                 {orders.map(o => (
                   <tr key={o.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                     <td className="px-4 py-3 text-white/80 font-mono text-xs">{o.order_number}</td>
-                    <td className="px-4 py-3 text-white/70">{o.customers?.name || '—'}</td>
-                    <td className="px-4 py-3 text-green-400 font-medium">৳{o.total.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-white/70">{getCustomerName(o.customers)}</td>
+                    <td className="px-4 py-3 text-green-400 font-medium">৳{(o.total || 0).toLocaleString()}</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs ${
                         o.status === 'completed' ? 'bg-green-400/10 text-green-400' :
