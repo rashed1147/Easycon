@@ -17,7 +17,7 @@ export default function Sidebar() {
     <aside className="w-52 bg-dark-900 flex flex-col h-screen fixed left-0 top-0 z-50 border-r border-white/5">
       <div className="px-4 py-4 flex items-center gap-2 border-b border-white/5">
         <div className="w-7 h-7 bg-blue-500 rounded-md flex items-center justify-center text-xs font-bold text-white">SC</div>
-        <span className="text-white font-medium text-sm">SmartChat</span>
+        <span className="text-white font-medium text-sm">Easycon</span>
       </div>
       <nav className="flex-1 py-2 overflow-y-auto">
         {nav.map(n => (
