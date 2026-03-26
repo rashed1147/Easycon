@@ -3,7 +3,7 @@ import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
 
 type Message = { id: string; content: string; direction: string; is_ai: boolean; created_at: string }
-type Sender = { fb_psid: string; last_message: string; last_time: string; message_count: number }
+type Sender = { fb_psid: string; sender_name: string; last_message: string; last_time: string; message_count: number; ai_enabled: boolean }
 
 export default function Inbox() {
   const [senders, setSenders] = useState<Sender[]>([])
@@ -14,37 +14,40 @@ export default function Inbox() {
   const [aiEnabled, setAiEnabled] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Load unique senders from messages
   useEffect(() => {
     async function loadSenders() {
-      const { data } = await supabase
-        .from('messages')
-        .select('fb_psid, content, created_at, direction')
+      const { data: logs } = await supabase
+        .from('user_logs')
+        .select('sender_id, sender_name, ai_enabled')
         .order('created_at', { ascending: false })
 
-      if (!data) return
+      if (!logs) return
 
-      // Group by fb_psid
-      const map: Record<string, Sender> = {}
-      data.forEach((m: { fb_psid: string; content: string; created_at: string; direction: string }) => {
-        if (!map[m.fb_psid]) {
-          map[m.fb_psid] = {
-            fb_psid: m.fb_psid,
-            last_message: m.content || '',
-            last_time: m.created_at,
-            message_count: 1,
+      const sendersWithMessages = await Promise.all(
+        logs.map(async (log) => {
+          const { data: msgs, count } = await supabase
+            .from('messages')
+            .select('content, created_at', { count: 'exact' })
+            .eq('fb_psid', log.sender_id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+
+          return {
+            fb_psid: log.sender_id,
+            sender_name: log.sender_name || `...${log.sender_id.slice(-4)}`,
+            last_message: msgs?.[0]?.content || '',
+            last_time: msgs?.[0]?.created_at || '',
+            message_count: count || 0,
+            ai_enabled: log.ai_enabled,
           }
-        } else {
-          map[m.fb_psid].message_count++
-        }
-      })
+        })
+      )
 
-      setSenders(Object.values(map))
+      setSenders(sendersWithMessages)
     }
     loadSenders()
   }, [])
 
-  // Load messages for selected sender
   useEffect(() => {
     if (!selected) return
 
@@ -55,15 +58,7 @@ export default function Inbox() {
       .order('created_at', { ascending: true })
       .then(({ data }) => setMessages((data as Message[]) || []))
 
-    // Load AI status from user_logs
-    supabase
-      .from('user_logs')
-      .select('ai_enabled')
-      .eq('sender_id', selected.fb_psid)
-      .single()
-      .then(({ data }) => {
-        if (data) setAiEnabled(data.ai_enabled)
-      })
+    setAiEnabled(selected.ai_enabled)
 
     const channel = supabase
       .channel('inbox-' + selected.fb_psid)
@@ -100,15 +95,18 @@ export default function Inbox() {
       .from('user_logs')
       .update({ ai_enabled: newVal })
       .eq('sender_id', selected.fb_psid)
+    setSenders(prev =>
+      prev.map(s => s.fb_psid === selected.fb_psid ? { ...s, ai_enabled: newVal } : s)
+    )
   }
 
   const filtered = senders.filter(s =>
-    s.fb_psid.includes(search) ||
-    (s.last_message || '').toLowerCase().includes(search.toLowerCase())
+    (s.sender_name || '').toLowerCase().includes(search.toLowerCase()) ||
+    s.fb_psid.includes(search)
   )
 
-  function shortId(psid: string) {
-    return psid.slice(-4)
+  function initials(name: string) {
+    return name.slice(0, 2).toUpperCase()
   }
 
   return (
@@ -118,7 +116,7 @@ export default function Inbox() {
         style={{ height: 'calc(100vh - 120px)' }}
       >
         {/* Sender List */}
-        <div className="w-56 border-r border-white/5 flex flex-col flex-shrink-0">
+        <div className="w-64 border-r border-white/5 flex flex-col flex-shrink-0">
           <div className="p-3 border-b border-white/5">
             <input
               className="w-full bg-dark-900 border border-white/10 rounded-lg px-3 py-1.5 text-xs text-white/70 placeholder-white/30 outline-none"
@@ -135,16 +133,23 @@ export default function Inbox() {
               <button
                 key={s.fb_psid}
                 onClick={() => setSelected(s)}
-                className={`w-full text-left px-3 py-3 border-b border-white/5 transition-colors flex items-center gap-2 ${
+                className={`w-full text-left px-3 py-3 border-b border-white/5 transition-colors flex items-center gap-2.5 ${
                   selected?.fb_psid === s.fb_psid ? 'bg-blue-500/10' : 'hover:bg-white/[0.03]'
                 }`}
               >
-                <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium flex items-center justify-center flex-shrink-0">
-                  {shortId(s.fb_psid)}
+                <div className="w-9 h-9 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium flex items-center justify-center flex-shrink-0">
+                  {initials(s.sender_name)}
                 </div>
-                <div className="min-w-0">
-                  <p className="text-white/80 text-xs font-medium truncate">...{shortId(s.fb_psid)}</p>
-                  <p className="text-white/30 text-xs truncate">{s.last_message?.slice(0, 20) || 'Image/Audio'}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between">
+                    <p className="text-white/80 text-xs font-medium truncate">{s.sender_name}</p>
+                    {!s.ai_enabled && (
+                      <span className="text-xs text-red-400/70 bg-red-400/10 px-1.5 py-0.5 rounded-full flex-shrink-0 ml-1">Off</span>
+                    )}
+                  </div>
+                  <p className="text-white/30 text-xs truncate mt-0.5">
+                    {s.last_message?.slice(0, 25) || 'Image/Audio'}
+                  </p>
                 </div>
               </button>
             ))}
@@ -155,11 +160,11 @@ export default function Inbox() {
         {selected ? (
           <div className="flex-1 flex flex-col">
             <div className="px-4 py-3 border-b border-white/5 flex items-center gap-3">
-              <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium flex items-center justify-center">
-                {shortId(selected.fb_psid)}
+              <div className="w-9 h-9 rounded-full bg-blue-500/20 text-blue-400 text-xs font-medium flex items-center justify-center">
+                {initials(selected.sender_name)}
               </div>
               <div>
-                <p className="text-white/80 text-sm font-medium">...{shortId(selected.fb_psid)}</p>
+                <p className="text-white/80 text-sm font-medium">{selected.sender_name}</p>
                 <p className="text-white/30 text-xs">{selected.message_count} messages</p>
               </div>
               <div className="ml-auto flex items-center gap-2 text-xs text-white/50">
@@ -170,14 +175,14 @@ export default function Inbox() {
                 >
                   <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all shadow-sm ${aiEnabled ? 'right-0.5' : 'left-0.5'}`} />
                 </button>
-                <span className={aiEnabled ? 'text-blue-400' : 'text-white/30'}>{aiEnabled ? 'ON' : 'OFF'}</span>
+                <span className={aiEnabled ? 'text-blue-400' : 'text-red-400'}>{aiEnabled ? 'ON' : 'OFF'}</span>
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.map(m => (
                 <div key={m.id} className={`flex ${m.direction === 'out' ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`max-w-xs px-3 py-2 rounded-xl text-sm leading-relaxed ${
+                  <div className={`max-w-sm px-3 py-2 rounded-xl text-sm leading-relaxed ${
                     m.direction === 'out'
                       ? m.is_ai
                         ? 'bg-blue-600/80 text-blue-100'
@@ -185,7 +190,7 @@ export default function Inbox() {
                       : 'bg-dark-700 border border-white/10 text-white/80'
                   }`}>
                     {m.is_ai && <p className="text-blue-300/60 text-xs mb-1">AI Reply</p>}
-                    {m.content || <span className="text-white/30 italic">Image/Audio</span>}
+                    {m.content || <span className="text-white/30 italic text-xs">Image/Audio</span>}
                   </div>
                 </div>
               ))}
