@@ -19,6 +19,17 @@ export default function Products() {
   const [loading, setLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<number | null>(null)
 
+  // Add Product Modal States
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [newProduct, setNewProduct] = useState({
+    product_id: '',
+    name: '',
+    description: '',
+    price: '',
+    availability: 'yes' // Default to in stock
+  })
+
   async function load() {
     const { data } = await supabase
       .from('products')
@@ -42,6 +53,33 @@ export default function Products() {
     setProducts(p => p.filter(x => x.id !== id))
   }
 
+  async function handleAddProduct(e: React.FormEvent) {
+    e.preventDefault()
+    setIsSubmitting(true)
+
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .insert([newProduct])
+        .select()
+        .single()
+
+      if (error) throw error
+
+      // Add the new product to the state (with an empty images array to prevent errors)
+      setProducts([{ ...data, product_images: [] }, ...products])
+      
+      // Reset and close modal
+      setNewProduct({ product_id: '', name: '', description: '', price: '', availability: 'yes' })
+      setIsAddModalOpen(false)
+    } catch (error) {
+      console.error('Error adding product:', error)
+      alert('Failed to add product. Make sure the Product ID is unique.')
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   const filtered = products.filter(p =>
     p.name.toLowerCase().includes(search.toLowerCase())
   )
@@ -59,7 +97,15 @@ export default function Products() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
-        <p className="text-xs text-white/30">Google Sheets থেকে product add হয় — n8n workflow ব্যবহার করুন</p>
+        <div className="flex items-center gap-4">
+          <p className="text-xs text-white/30 hidden md:block">Google Sheets থেকে product add হয় — n8n workflow ব্যবহার করুন</p>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="bg-blue-500 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors flex items-center gap-2"
+          >
+            <span className="text-lg leading-none mt-[-2px]">+</span> Add Product
+          </button>
+        </div>
       </div>
 
       <div className="bg-dark-800 border border-white/5 rounded-xl overflow-hidden">
@@ -79,8 +125,8 @@ export default function Products() {
               <tr><td colSpan={6} className="px-4 py-8 text-center text-white/30">No products found</td></tr>
             )}
             {filtered.map(p => (
-              <>
-                <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+              <React.Fragment key={p.id}>
+                <tr className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
                   <td className="px-4 py-3">
                     {getPrimaryImage(p.product_images) ? (
                       <img
@@ -139,7 +185,7 @@ export default function Products() {
                               className="w-16 h-16 object-cover rounded-lg border border-white/10"
                             />
                             {img.is_primary && (
-                              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs px-1 rounded-full">P</span>
+                              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-[10px] px-1.5 py-0.5 rounded-full font-medium">Primary</span>
                             )}
                           </div>
                         ))}
@@ -147,11 +193,92 @@ export default function Products() {
                     </td>
                   </tr>
                 )}
-              </>
+              </React.Fragment>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* Add Product Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-dark-800 border border-white/10 rounded-xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-white/5 flex justify-between items-center">
+              <h3 className="text-white font-medium">Add New Product</h3>
+              <button 
+                onClick={() => setIsAddModalOpen(false)} 
+                className="text-white/40 hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <form onSubmit={handleAddProduct} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5">Product ID</label>
+                <input 
+                  required 
+                  className="w-full bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-blue-500/50" 
+                  value={newProduct.product_id} 
+                  onChange={e => setNewProduct({...newProduct, product_id: e.target.value})} 
+                  placeholder="e.g. PRD-001" 
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5">Product Name</label>
+                <input 
+                  required 
+                  className="w-full bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-blue-500/50" 
+                  value={newProduct.name} 
+                  onChange={e => setNewProduct({...newProduct, name: e.target.value})} 
+                  placeholder="e.g. LED NoteBoard" 
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5">Price (৳)</label>
+                <input 
+                  required 
+                  type="number" 
+                  className="w-full bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-blue-500/50" 
+                  value={newProduct.price} 
+                  onChange={e => setNewProduct({...newProduct, price: e.target.value})} 
+                  placeholder="e.g. 600" 
+                />
+              </div>
+              
+              <div>
+                <label className="block text-xs text-white/50 mb-1.5">Description</label>
+                <textarea 
+                  className="w-full bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/20 outline-none focus:border-blue-500/50 resize-none" 
+                  rows={3} 
+                  value={newProduct.description} 
+                  onChange={e => setNewProduct({...newProduct, description: e.target.value})} 
+                  placeholder="Product description..."
+                ></textarea>
+              </div>
+              
+              <div className="flex justify-end gap-3 pt-4 border-t border-white/5 mt-6">
+                <button 
+                  type="button" 
+                  onClick={() => setIsAddModalOpen(false)} 
+                  className="px-4 py-2 text-sm text-white/60 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSubmitting} 
+                  className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  {isSubmitting ? 'Adding...' : 'Save Product'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </Layout>
   )
 }
