@@ -2,52 +2,53 @@ import { useEffect, useState } from 'react'
 import Layout from '../components/Layout'
 import { supabase } from '../lib/supabase'
 
-type Product = { id: string; name: string; price: number; stock: number; is_active: boolean; image_url?: string; sizes?: string[] }
+type ProductImage = { id: number; image_url: string; is_primary: boolean }
+type Product = {
+  id: number
+  product_id: string
+  name: string
+  description: string
+  price: string
+  availability: string
+  product_images: ProductImage[]
+}
 
 export default function Products() {
   const [products, setProducts] = useState<Product[]>([])
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
-  const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', price: '', stock: '', sizes: '', description: '' })
-  const [saving, setSaving] = useState(false)
+  const [expandedId, setExpandedId] = useState<number | null>(null)
 
   async function load() {
-    const { data } = await supabase.from('products').select('*').order('created_at', { ascending: false })
-    setProducts(data || [])
+    const { data } = await supabase
+      .from('products')
+      .select('id, product_id, name, description, price, availability, product_images(id, image_url, is_primary)')
+      .order('id', { ascending: false })
+    setProducts((data as Product[]) || [])
     setLoading(false)
   }
 
   useEffect(() => { load() }, [])
 
-  async function toggleActive(id: string, val: boolean) {
-    await supabase.from('products').update({ is_active: !val }).eq('id', id)
-    setProducts(p => p.map(x => x.id === id ? { ...x, is_active: !val } : x))
+  async function toggleAvailability(id: number, current: string) {
+    const newVal = current === 'yes' ? 'no' : 'yes'
+    await supabase.from('products').update({ availability: newVal }).eq('id', id)
+    setProducts(p => p.map(x => x.id === id ? { ...x, availability: newVal } : x))
   }
 
-  async function deleteProduct(id: string) {
+  async function deleteProduct(id: number) {
     if (!confirm('এই product টি delete করবেন?')) return
     await supabase.from('products').delete().eq('id', id)
     setProducts(p => p.filter(x => x.id !== id))
   }
 
-  async function saveProduct() {
-    setSaving(true)
-    const sizes = form.sizes.split(',').map(s => s.trim()).filter(Boolean)
-    await supabase.from('products').insert({
-      name: form.name,
-      price: parseFloat(form.price),
-      stock: parseInt(form.stock),
-      sizes,
-      description: form.description,
-    })
-    setForm({ name: '', price: '', stock: '', sizes: '', description: '' })
-    setShowForm(false)
-    setSaving(false)
-    load()
-  }
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  )
 
-  const filtered = products.filter(p => p.name.toLowerCase().includes(search.toLowerCase()))
+  function getPrimaryImage(images: ProductImage[]) {
+    return images?.find(i => i.is_primary)?.image_url || images?.[0]?.image_url || null
+  }
 
   return (
     <Layout title="Products">
@@ -55,83 +56,98 @@ export default function Products() {
         <input
           className="bg-dark-800 border border-white/10 rounded-lg px-3 py-2 text-sm text-white/80 placeholder-white/30 outline-none focus:border-blue-500/50 w-56"
           placeholder="Search products..."
-          value={search} onChange={e => setSearch(e.target.value)}
+          value={search}
+          onChange={e => setSearch(e.target.value)}
         />
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="bg-blue-500 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded-lg transition-colors font-medium">
-          + Add Product
-        </button>
+        <p className="text-xs text-white/30">Google Sheets থেকে product add হয় — n8n workflow ব্যবহার করুন</p>
       </div>
-
-      {showForm && (
-        <div className="bg-dark-800 border border-blue-500/20 rounded-xl p-5 mb-5">
-          <h3 className="text-white font-medium mb-4 text-sm">New Product</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              ['name','Product Name (Bangla ok)','text'],
-              ['price','Price (৳)','number'],
-              ['stock','Stock quantity','number'],
-              ['sizes','Sizes (S,M,L,XL)','text'],
-            ].map(([f,p,t]) => (
-              <input key={f}
-                className="bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-blue-500/50"
-                type={t} placeholder={p}
-                value={(form as Record<string,string>)[f]}
-                onChange={e => setForm(prev => ({ ...prev, [f]: e.target.value }))}
-              />
-            ))}
-            <input
-              className="col-span-2 bg-dark-900 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:border-blue-500/50"
-              placeholder="Description (optional)"
-              value={form.description}
-              onChange={e => setForm(p => ({ ...p, description: e.target.value }))}
-            />
-          </div>
-          <div className="flex gap-2 mt-3">
-            <button onClick={saveProduct} disabled={saving}
-              className="bg-blue-500 hover:bg-blue-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg transition-colors">
-              {saving ? 'Saving...' : 'Save Product'}
-            </button>
-            <button onClick={() => setShowForm(false)} className="text-white/40 hover:text-white/70 text-sm px-4 py-2">Cancel</button>
-          </div>
-        </div>
-      )}
 
       <div className="bg-dark-800 border border-white/5 rounded-xl overflow-hidden">
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-white/5 bg-dark-900/50">
-              {['Name','Price','Stock','Status','Actions'].map(h => (
+              {['Image', 'Name', 'Price', 'Availability', 'Images', 'Actions'].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs text-white/40 font-medium">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={5} className="px-4 py-8 text-center text-white/30">Loading...</td></tr>}
-            {!loading && filtered.length === 0 && <tr><td colSpan={5} className="px-4 py-8 text-center text-white/30">No products found</td></tr>}
+            {loading && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-white/30">Loading...</td></tr>
+            )}
+            {!loading && filtered.length === 0 && (
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-white/30">No products found</td></tr>
+            )}
             {filtered.map(p => (
-              <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                <td className="px-4 py-3">
-                  <p className="text-white/80 font-medium">{p.name}</p>
-                  {p.sizes?.length ? <p className="text-xs text-white/30 mt-0.5">{p.sizes.join(', ')}</p> : null}
-                </td>
-                <td className="px-4 py-3 text-green-400 font-medium">৳{p.price.toLocaleString()}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs ${p.stock < 5 ? 'bg-red-400/10 text-red-400' : 'bg-green-400/10 text-green-400'}`}>
-                    {p.stock}
-                  </span>
-                </td>
-                <td className="px-4 py-3">
-                  <button onClick={() => toggleActive(p.id, p.is_active)}
-                    className={`w-9 h-5 rounded-full relative transition-colors ${p.is_active ? 'bg-blue-500' : 'bg-white/10'}`}>
-                    <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${p.is_active ? 'right-0.5' : 'left-0.5'}`}/>
-                  </button>
-                </td>
-                <td className="px-4 py-3">
-                  <button onClick={() => deleteProduct(p.id)} className="text-red-400/60 hover:text-red-400 text-xs transition-colors">Delete</button>
-                </td>
-              </tr>
+              <>
+                <tr key={p.id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                  <td className="px-4 py-3">
+                    {getPrimaryImage(p.product_images) ? (
+                      <img
+                        src={getPrimaryImage(p.product_images)!}
+                        alt={p.name}
+                        className="w-12 h-12 object-cover rounded-lg border border-white/10"
+                      />
+                    ) : (
+                      <div className="w-12 h-12 bg-dark-700 rounded-lg border border-white/10 flex items-center justify-center text-white/20 text-xs">
+                        No img
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    <p className="text-white/80 font-medium">{p.name}</p>
+                    <p className="text-xs text-white/30 mt-0.5 line-clamp-1">{p.description}</p>
+                  </td>
+                  <td className="px-4 py-3 text-green-400 font-medium">৳{p.price}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => toggleAvailability(p.id, p.availability)}
+                      className={`w-10 h-5 rounded-full relative transition-colors ${p.availability === 'yes' ? 'bg-blue-500' : 'bg-white/10'}`}
+                    >
+                      <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all ${p.availability === 'yes' ? 'right-0.5' : 'left-0.5'}`} />
+                    </button>
+                    <span className={`ml-2 text-xs ${p.availability === 'yes' ? 'text-green-400' : 'text-white/30'}`}>
+                      {p.availability === 'yes' ? 'In Stock' : 'Out'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                      className="text-xs text-blue-400/70 hover:text-blue-400 transition-colors"
+                    >
+                      {p.product_images?.length || 0} images {expandedId === p.id ? '▲' : '▼'}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => deleteProduct(p.id)}
+                      className="text-red-400/60 hover:text-red-400 text-xs transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+                {expandedId === p.id && p.product_images?.length > 0 && (
+                  <tr key={`images-${p.id}`} className="border-b border-white/5 bg-dark-900/30">
+                    <td colSpan={6} className="px-4 py-3">
+                      <div className="flex gap-2 flex-wrap">
+                        {p.product_images.map(img => (
+                          <div key={img.id} className="relative">
+                            <img
+                              src={img.image_url}
+                              alt=""
+                              className="w-16 h-16 object-cover rounded-lg border border-white/10"
+                            />
+                            {img.is_primary && (
+                              <span className="absolute -top-1 -right-1 bg-blue-500 text-white text-xs px-1 rounded-full">P</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
             ))}
           </tbody>
         </table>
